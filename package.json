@@ -1,0 +1,22 @@
+{
+  "name": "msmcp",
+  "version": "0.1.0",
+  "description": "Remote MCP server exposing New Zealand weather forecasts over Streamable HTTP, running on Cloudflare Workers.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "agents": "^0.14.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260603.1",
+    "typescript": "^6.0.0",
+    "wrangler": "^4.97.0"
+  }
+}

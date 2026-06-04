@@ -1,0 +1,17 @@
+name = "msmcp"
+main = "src/index.ts"
+compatibility_date = "2026-06-04"
+
+# The MCP SDK and the `agents` runtime expect Node-compatible globals
+# (e.g. `node:crypto` for request id generation). This flag provides them
+# inside the V8 isolate without pulling in a full Node runtime.
+compatibility_flags = ["nodejs_compat"]
+
+# Selects the active ForecastFetcher at runtime. Flip to "metservice" in a
+# later phase once the MetService integration lands — no code changes needed
+# in the tool layer (see src/fetchers/interface.ts).
+[vars]
+FETCHER = "openmeteo"
+
+# No KV / D1 / Durable Object bindings in Phase 1.
+# Caching (KV) and metering (D1) are introduced in Phase 3.

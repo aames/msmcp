@@ -1,0 +1,20 @@
+# Local Claude Code config (personal, not for team)
+.claude/settings.local.json
+.claude/agents/
+.claude/agent-memory/
+
+# Secrets and local config
+.env
+.env.local
+*.vars
+wrangler.toml.local
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.wrangler/
+
+# OS
+.DS_Store
