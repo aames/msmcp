@@ -4,8 +4,10 @@ A remote [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server
 that exposes **New Zealand weather forecasts** as tools an LLM can call. It runs
 on **Cloudflare Workers** and speaks MCP over **Streamable HTTP**.
 
-Phase 1 is intentionally small: two tools, one forecast provider, no auth, no
-caching, no persistence.
+It is intentionally small: two tools, a pluggable forecast provider, no auth, no
+caching, no persistence. The deployed worker is backed by **MetService** (NZ's
+national forecaster); a free, key-less **Open-Meteo** provider is also built in
+and selectable via config (see [Configuration](#configuration)).
 
 ## Tools
 
@@ -16,6 +18,33 @@ caching, no persistence.
 
 The model is expected to call `geocode` first when it has a place name, then
 pass the coordinates to `get_forecast`.
+
+## Example
+
+Connected to an MCP client (e.g. as a custom connector in Claude), the model
+chains the two tools on its own. Asking _"check the weather in Timaru"_:
+
+1. `geocode("Timaru")` resolves the place to coordinates in Canterbury.
+2. `get_forecast(lat, lon)` returns the hourly series plus derived flags:
+
+   ```json
+   {
+     "rain_expected": false,
+     "overnight_min_temp_c": 11.11,
+     "summary": "Mostly dry with gusts to 18 km/h, overnight low 11°C.",
+     "fetcher_used": "metservice"
+   }
+   ```
+
+3. The model answers from the `summary` and flags, without re-reading the
+   hourly array:
+
+   > Timaru's mostly dry today, peaking around 13–14°C, with cloud building
+   > through the day but no real rain. Wind is barely there, gusting only to
+   > about 18 km/h.
+
+The `fetcher_used` field reports which provider produced the data — here,
+`metservice`.
 
 ## Architecture
 
@@ -28,8 +57,8 @@ src/
     forecast.ts       get_forecast tool: defaults, derived flags, summary.
   fetchers/
     interface.ts      ForecastFetcher interface + ForecastParams/RawForecast.
-    openmeteo.ts      OpenMeteoFetcher (active in Phase 1).
-    metservice.ts     MetServiceFetcher stub (throws until a later phase).
+    openmeteo.ts      OpenMeteoFetcher (free, key-less fallback provider).
+    metservice.ts     MetServiceFetcher (active in production; needs an API key).
   types.ts            Public domain types (GeocodedLocation, ForecastResult…).
 ```
 
@@ -53,8 +82,8 @@ on the Workers **free tier**.
 
 | Variable             | Where            | Default      | Notes                                      |
 | -------------------- | ---------------- | ------------ | ------------------------------------------ |
-| `FETCHER`            | `wrangler.toml`  | `openmeteo`  | `openmeteo` or `metservice`.               |
-| `METSERVICE_API_KEY` | `.dev.vars` / secret | _(unset)_ | Required only when `FETCHER=metservice`.   |
+| `FETCHER`            | `wrangler.toml`  | `openmeteo`  | `openmeteo` or `metservice`. The deployed worker is set to `metservice`. |
+| `METSERVICE_API_KEY` | secret / `.dev.vars` | _(unset)_ | Required when `FETCHER=metservice`. In production it is a **Cloudflare Worker secret** (`wrangler secret put METSERVICE_API_KEY`), encrypted at Cloudflare and never stored in the repo. For local `wrangler dev`, put it in `.dev.vars` (gitignored). |
 
 ## Running locally
 
@@ -129,23 +158,28 @@ curl -s "${H[@]}" "$URL" -d '{
 ```
 
 Expect `structuredContent` with an `hourly` array, a `rain_expected` boolean,
-`overnight_min_temp_c`, a one-sentence `summary`, and `fetcher_used:
-"openmeteo"`.
+`overnight_min_temp_c`, a one-sentence `summary`, and a `fetcher_used` field
+naming the active provider (`metservice` or `openmeteo`).
 
 ### 5. Verify error handling
 
-A non-NZ place should produce a tool error (not a crash):
+A place with no New Zealand match should produce a tool error (not a crash).
+Note that a foreign city name alone is *not* enough to trigger this: the
+`countrycodes=nz` filter only restricts results to NZ, so a name that happens to
+match an NZ street or locality still resolves (e.g. there is a "Tokyo" in
+Albany, Auckland). Use a string with no NZ match at all:
 
 ```bash
 curl -s "${H[@]}" "$URL" -d '{
   "jsonrpc":"2.0","id":5,"method":"tools/call",
-  "params":{"name":"geocode","arguments":{"place":"Tokyo"}}
+  "params":{"name":"geocode","arguments":{"place":"Zzqwxnowhereville"}}
 }'
 ```
 
 Expect a result with `isError: true` and a clear message about no NZ match.
 
-## Not in Phase 1
+## Out of scope (for now)
 
-Auth / OAuth, caching, rate limiting / metering, and any real MetService API
-calls are deliberately out of scope and arrive in later phases.
+Auth / OAuth, caching, and rate limiting / metering are deliberately out of
+scope and arrive in later phases. (Real MetService API calls were earlier
+out of scope but are now live — the worker runs against MetService.)
