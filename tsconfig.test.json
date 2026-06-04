@@ -1,0 +1,11 @@
+{
+  /*
+   * Type-checks the test suite (and the Vitest config) against the same strict
+   * options as `src`. Kept separate from the base config so the production
+   * build's `include` stays limited to `src/**`, while `npm run typecheck`
+   * still validates the tests (see the `typecheck` script). tsc also checks the
+   * `src` files these tests import, so nothing slips through untyped.
+   */
+  "extends": "./tsconfig.json",
+  "include": ["test/**/*.ts", "vitest.config.ts"]
+}

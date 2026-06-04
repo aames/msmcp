@@ -203,11 +203,11 @@ function buildSummary(hourly: readonly HourlyForecast[]): string {
 }
 
 /**
- * Applies default window and variable selection to the raw tool input.
- * Exported only conceptually via {@link registerGetForecastTool}; kept here so
- * the defaulting policy lives next to the values it defaults.
+ * Applies default window and variable selection to the raw tool input. Exported
+ * so the defaulting policy (default window, default variable set) can be unit
+ * tested directly; the registered tool calls it before {@link getForecast}.
  */
-function resolveRequest(input: {
+export function resolveRequest(input: {
   lat: number;
   lon: number;
   start: string | undefined;
