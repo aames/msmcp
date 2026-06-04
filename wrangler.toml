@@ -11,7 +11,7 @@ compatibility_flags = ["nodejs_compat"]
 # later phase once the MetService integration lands — no code changes needed
 # in the tool layer (see src/fetchers/interface.ts).
 [vars]
-FETCHER = "openmeteo"
+FETCHER = "metservice"
 
 # No KV / D1 / Durable Object bindings in Phase 1.
 # Caching (KV) and metering (D1) are introduced in Phase 3.
