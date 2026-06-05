@@ -1,4 +1,5 @@
 # Local Claude Code config (personal, not for team)
+.claude/settings.json
 .claude/settings.local.json
 .claude/agents/
 .claude/agent-memory/
