@@ -44,6 +44,11 @@ const VARIABLE_TO_OPEN_METEO: Readonly<Record<ForecastVariable, string>> = {
  * shares the same length and index alignment.
  */
 interface OpenMeteoResponse {
+  /**
+   * The location's UTC offset in seconds (timestamps are local wall-clock).
+   * Needed to convert the tool layer's UTC window bounds before clipping.
+   */
+  readonly utc_offset_seconds?: number;
   readonly hourly?: {
     readonly time?: readonly string[];
     readonly temperature_2m?: readonly number[];
@@ -70,8 +75,17 @@ export class OpenMeteoFetcher implements ForecastFetcher {
       );
     }
 
+    const offsetSeconds = payload.utc_offset_seconds;
+    if (typeof offsetSeconds !== "number") {
+      throw new Error(
+        "Open-Meteo response did not include utc_offset_seconds; cannot align the forecast window.",
+      );
+    }
+
     const hourly = this.toHourlyRows(payload);
-    return { hourly: this.clipToWindow(hourly, params.start, params.end) };
+    return {
+      hourly: this.clipToWindow(hourly, params.start, params.end, offsetSeconds),
+    };
   }
 
   /**
@@ -147,18 +161,20 @@ export class OpenMeteoFetcher implements ForecastFetcher {
 
   /**
    * Restricts the series to `[start, end]`. Open-Meteo timestamps lack an
-   * explicit offset (they are local wall-clock for the location), so we compare
-   * lexicographically on the ISO strings — valid because the format is
-   * fixed-width (`YYYY-MM-DDTHH:mm`) and the bounds are normalised to the same
-   * shape by {@link toComparableBound}.
+   * explicit offset (they are local wall-clock for the location), while the
+   * bounds arrive in UTC — so {@link toComparableBound} first shifts each bound
+   * by the location's offset, then comparison is lexicographic on the
+   * fixed-width `YYYY-MM-DDTHH:mm` strings. Without the shift the window is
+   * wrong by the offset (~12h for NZ), returning hours already in the past.
    */
   private clipToWindow(
     rows: readonly RawHourly[],
     start: string,
     end: string,
+    offsetSeconds: number,
   ): RawHourly[] {
-    const lower = toComparableBound(start);
-    const upper = toComparableBound(end);
+    const lower = toComparableBound(start, offsetSeconds);
+    const upper = toComparableBound(end, offsetSeconds);
     return rows.filter((row) => row.time >= lower && row.time <= upper);
   }
 }
@@ -187,13 +203,14 @@ function readColumn(
 }
 
 /**
- * Normalises an ISO datetime bound to Open-Meteo's `YYYY-MM-DDTHH:mm` minute
- * precision so it can be compared lexicographically against response
- * timestamps. Seconds and any timezone designator are dropped.
+ * Converts a UTC (or offset-carrying) ISO bound to the location's local
+ * wall-clock at Open-Meteo's `YYYY-MM-DDTHH:mm` minute precision, so it can be
+ * compared lexicographically against response timestamps.
  */
-function toComparableBound(iso: string): string {
-  // `2026-06-04T18:30:00Z` -> `2026-06-04T18:30`
-  return iso.slice(0, 16);
+function toComparableBound(iso: string, offsetSeconds: number): string {
+  // e.g. `2026-06-04T06:30:00Z` at +12:00 -> `2026-06-04T18:30`
+  const shifted = new Date(Date.parse(iso) + offsetSeconds * 1000);
+  return shifted.toISOString().slice(0, 16);
 }
 
 /** Extracts a safe, message-only description from an unknown thrown value. */

@@ -18,10 +18,16 @@ const PARAMS: ForecastParams = {
   variables: ["temperature", "precipitation", "wind_speed", "wind_gust", "cloud_cover"],
 };
 
-/** A column-oriented response with `times` and matching-length series. */
-function payload(times: readonly string[]) {
+/**
+ * A column-oriented response with `times` and matching-length series.
+ * `utcOffsetSeconds` mirrors Open-Meteo's `utc_offset_seconds` field (the
+ * location's offset, since timestamps are local wall-clock); 0 models a
+ * UTC-located place, 43200 models NZ winter (UTC+12).
+ */
+function payload(times: readonly string[], utcOffsetSeconds = 0) {
   const fill = (v: number) => times.map(() => v);
   return {
+    utc_offset_seconds: utcOffsetSeconds,
     hourly: {
       time: [...times],
       temperature_2m: fill(15),
@@ -76,6 +82,45 @@ describe("window clipping", () => {
       "2026-06-04T03:00",
       "2026-06-04T05:00",
     ]);
+  });
+});
+
+describe("window clipping respects the location's UTC offset", () => {
+  // Response timestamps are local wall-clock, but the tool layer supplies the
+  // window bounds in UTC. Comparing them raw shifts the window by the
+  // location's offset (~12h for NZ), returning hours that are already past.
+
+  it("converts the UTC bounds using utc_offset_seconds before comparing", async () => {
+    // Bounds 2026-06-03T12:00Z–17:00Z are local 2026-06-04T00:00–05:00 at +12.
+    stubFetch(
+      payload(
+        [
+          "2026-06-03T23:00", // local, before the window -> dropped
+          "2026-06-04T00:00", // == local start bound -> kept
+          "2026-06-04T05:00", // == local end bound -> kept
+          "2026-06-04T06:00", // after the window -> dropped
+        ],
+        43200,
+      ),
+    );
+    const { hourly } = await new OpenMeteoFetcher().getForecast({
+      ...PARAMS,
+      start: "2026-06-03T12:00:00.000Z",
+      end: "2026-06-03T17:00:00.000Z",
+    });
+    expect(hourly.map((h) => h.time)).toEqual([
+      "2026-06-04T00:00",
+      "2026-06-04T05:00",
+    ]);
+  });
+
+  it("throws when the response lacks utc_offset_seconds", async () => {
+    const body = payload(["2026-06-04T01:00"]) as { utc_offset_seconds?: number };
+    delete body.utc_offset_seconds;
+    stubFetch(body);
+    await expect(new OpenMeteoFetcher().getForecast(PARAMS)).rejects.toThrow(
+      /utc_offset_seconds/,
+    );
   });
 });
 

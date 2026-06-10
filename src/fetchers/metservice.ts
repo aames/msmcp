@@ -8,6 +8,15 @@
  * here is zipping those columns into per-hour rows, converting units to this
  * server's normalised set, and dropping any hour MetService could not vouch for.
  *
+ * ## Timezone
+ *
+ * The API answers in UTC, but the {@link RawHourly} contract requires
+ * location-local timestamps — the tool layer derives the overnight band from
+ * the hour digits in the string. We convert every timestamp to NZ local time
+ * (`Pacific/Auckland`, DST-aware via `Intl`). Caveat: the Chatham Islands run
+ * 45 minutes ahead of the mainland; their overnight band will be offset by
+ * that much, which we accept for an NZ-mainland-focused server.
+ *
  * Switching `FETCHER=metservice` is a configuration change, not a structural
  * one (Open/Closed): the tool layer depends only on {@link ForecastFetcher}.
  *
@@ -34,6 +43,28 @@ const FORECAST_INTERVAL = "1h";
  * hour when any requested variable is flagged, rather than emit a partial row.
  */
 const NO_DATA_GOOD = 0;
+
+/**
+ * The IANA zone all of mainland NZ shares. Used to convert the API's UTC
+ * timestamps to the local wall-clock time the {@link RawHourly} contract
+ * requires (see the module doc for the Chatham Islands caveat).
+ */
+const NZ_TIMEZONE = "Pacific/Auckland";
+
+/**
+ * Formats a UTC instant as NZ local date/time parts. `en-CA` gives ISO-style
+ * numeric parts; `h23` keeps midnight as `00` rather than `24`. Module-level so
+ * the (relatively expensive) formatter is built once per isolate, not per row.
+ */
+const NZ_LOCAL_TIME_FORMAT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: NZ_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
 
 /** Absolute zero offset for converting Kelvin to degrees Celsius. */
 const KELVIN_TO_CELSIUS_OFFSET = 273.15;
@@ -121,7 +152,8 @@ export class MetServiceFetcher implements ForecastFetcher {
     }
 
     const columns = this.resolveColumns(payload, times.length);
-    return { hourly: zipGoodHours(times, columns) };
+    const localTimes = times.map(toNzLocalTime);
+    return { hourly: zipGoodHours(localTimes, columns) };
   }
 
   /**
@@ -208,6 +240,33 @@ export class MetServiceFetcher implements ForecastFetcher {
 
     return resolved;
   }
+}
+
+/**
+ * Converts a UTC ISO timestamp from the API to NZ local time in the same
+ * `YYYY-MM-DDTHH:mm` shape Open-Meteo produces, keeping the {@link RawHourly}
+ * contract identical across providers.
+ *
+ * @throws Error (clean, relayable) if the timestamp cannot be parsed — failing
+ *   loudly beats silently emitting an hour the overnight derivation would
+ *   misclassify.
+ */
+function toNzLocalTime(utcIso: string): string {
+  const instant = new Date(utcIso);
+  if (Number.isNaN(instant.getTime())) {
+    throw new Error(`MetService returned an unreadable timestamp: "${utcIso}".`);
+  }
+
+  const parts: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
+  for (const part of NZ_LOCAL_TIME_FORMAT.formatToParts(instant)) {
+    parts[part.type] = part.value;
+  }
+  const { year, month, day, hour, minute } = parts;
+  if (!year || !month || !day || !hour || !minute) {
+    throw new Error("Could not convert a MetService timestamp to NZ local time.");
+  }
+
+  return `${year}-${month}-${day}T${hour}:${minute}`;
 }
 
 /**

@@ -65,7 +65,8 @@ describe("unit conversion", () => {
     expect(row.wind_gust_kmh).toBeCloseTo(72, 6);
     expect(row.precipitation_mm_per_hour).toBe(0.5);
     expect(row.cloud_cover_pct).toBe(83);
-    expect(row.time).toBe("2026-06-04T00:00:00.000Z");
+    // 00:00 UTC converted to NZ local (NZST, +12) per the RawHourly contract.
+    expect(row.time).toBe("2026-06-04T12:00");
   });
 });
 
@@ -79,9 +80,10 @@ describe("noData filtering", () => {
     const { hourly } = await new MetServiceFetcher(API_KEY).getForecast(PARAMS);
 
     expect(hourly).toHaveLength(2);
+    // UTC hours 00 and 02 surface as NZ local (NZST, +12) hours 12 and 14.
     expect(hourly.map((h) => h.time)).toEqual([
-      "2026-06-04T00:00:00.000Z",
-      "2026-06-04T02:00:00.000Z",
+      "2026-06-04T12:00",
+      "2026-06-04T14:00",
     ]);
   });
 
@@ -138,6 +140,46 @@ describe("outbound request contract", () => {
     expect(sent.points).toEqual([{ lat: PARAMS.lat, lon: PARAMS.lon }]);
     expect(sent.time).toEqual({ from: PARAMS.start, to: PARAMS.end, interval: "1h" });
     expect(sent.variables).toContain("air.temperature.at-2m");
+  });
+});
+
+describe("timezone normalisation", () => {
+  // The MetOcean API answers in UTC, but the RawHourly contract requires
+  // location-local time: the tool layer's overnight band (18:00–08:00) reads
+  // the hour straight off the string. Passing UTC through shifts the band by
+  // ~12 hours for NZ, so overnight_min_temp_c is computed over NZ daytime.
+
+  it("converts UTC timestamps to NZ local time (NZST, UTC+12)", async () => {
+    const body = payload(1);
+    body.dimensions.time.data = ["2026-06-03T06:00:00.000Z"]; // 18:00 NZ winter
+    stubFetch(body);
+    const { hourly } = await new MetServiceFetcher(API_KEY).getForecast(PARAMS);
+    expect(hourly[0]!.time).toBe("2026-06-03T18:00");
+  });
+
+  it("honours NZ daylight saving (NZDT, UTC+13)", async () => {
+    const body = payload(1);
+    body.dimensions.time.data = ["2026-01-10T09:00:00.000Z"]; // 22:00 NZ summer
+    stubFetch(body);
+    const { hourly } = await new MetServiceFetcher(API_KEY).getForecast(PARAMS);
+    expect(hourly[0]!.time).toBe("2026-01-10T22:00");
+  });
+
+  it("rolls the date over when conversion crosses midnight", async () => {
+    const body = payload(1);
+    body.dimensions.time.data = ["2026-06-03T14:00:00.000Z"]; // 02:00 next day
+    stubFetch(body);
+    const { hourly } = await new MetServiceFetcher(API_KEY).getForecast(PARAMS);
+    expect(hourly[0]!.time).toBe("2026-06-04T02:00");
+  });
+
+  it("throws on an unreadable timestamp rather than emitting a junk hour", async () => {
+    const body = payload(1);
+    body.dimensions.time.data = ["not-a-timestamp"];
+    stubFetch(body);
+    await expect(new MetServiceFetcher(API_KEY).getForecast(PARAMS)).rejects.toThrow(
+      /unreadable timestamp/,
+    );
   });
 });
 

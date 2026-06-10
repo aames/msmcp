@@ -57,6 +57,13 @@ export interface RawForecast {
  * doesn't supply) without coupling the provider contract to it.
  */
 export interface RawHourly {
+  /**
+   * ISO timestamp in the **forecast location's local time**
+   * (`YYYY-MM-DDTHH:mm`, no UTC offset suffix). This is a hard contract:
+   * the tool layer derives the overnight band (18:00–08:00) from the hour
+   * digits, so a provider that answers in UTC MUST convert before returning —
+   * passing UTC through shifts the band by ~12 hours for NZ.
+   */
   readonly time: string;
   readonly temperature_c: number;
   readonly precipitation_mm_per_hour: number;
